@@ -2,70 +2,120 @@ package game
 
 import (
 	"spacegame/assets"
+	"spacegame/base"
+	u "spacegame/utils"
 
 	"github.com/hajimehoshi/ebiten/v2"
 )
 
+// Player represents the player structure
 type Player struct {
-	image              *ebiten.Image
-	position           *Vector
-	game               *Game
-	laserShootingTimer *Timer
+	*base.Sprite
+	Speed            float64
+	ShootingCoolDown *Timer
+	Game             *Game
 }
 
+// Cretes a new Player
 func NewPlayer(game *Game) *Player {
-	image := assets.PlayerSprite
-	bounds := image.Bounds()
+	sprite := assets.PlayerSprite
+	bounds := sprite.Bounds()
 
-	halfImgX := float64(bounds.Dx()) / 2
-	x := SCREEN_WIDTH / 2 - halfImgX
-	y := SCREEN_HEIGHT * .75
+	size := &u.Size{Width: bounds.Dx(), Height: bounds.Dy()}
+	initialPosition := &u.Vector{
+		X: float64(SCREEN_WIDTH/2 - size.Width/2),
+		Y: 550,
+	}
+	initialDirection := &u.Vector{X: STOPPED, Y: STOPPED}
+	shootingTimer := NewTimer(20)
 
-	position := &Vector{x, y}
 	return &Player{
-		image: image,
-		position: position,
-		game: game,
-		laserShootingTimer: NewTimer(15),
+		Sprite: &base.Sprite{
+			Img:       sprite,
+			Size:      size,
+			Position:  initialPosition,
+			Direction: initialDirection,
+		},
+		Speed: .8,
+
+		ShootingCoolDown: shootingTimer,
+		Game:             game,
+	}
+}
+
+/*
+GetDirection sets the player direction and return it. The directions is 1 if the player
+is moving to right, -1 if is moving to left or 0 if he is not moving. The player moves
+only in the X direction
+*/
+func (p *Player) GetDirection() int {
+	switch {
+	case ebiten.IsKeyPressed(ebiten.KeyArrowLeft) || ebiten.IsKeyPressed(ebiten.KeyA):
+		p.Direction.X = LEFT
+		return LEFT
+
+	case ebiten.IsKeyPressed(ebiten.KeyArrowRight) || ebiten.IsKeyPressed(ebiten.KeyD):
+		p.Direction.X = RIGHT
+		return RIGHT
+
+	default:
+		p.Direction.X = STOPPED
+		return STOPPED
+	}
+}
+
+// Move handles the player's movement mechanic
+func (p *Player) Move() {
+	direction := p.GetDirection()
+	if direction == STOPPED {
+		return
+	}
+
+	MIN_X, MAX_X := 0.0, float64(SCREEN_WIDTH-p.Size.Width)
+
+	newPos := p.Position.X + float64(direction)*p.Speed*BASE_SPEED
+	isIntoScreen := IsBetween(newPos, MIN_X, MAX_X)
+
+	if isIntoScreen {
+		p.Position.X = newPos
+		return
+	}
+
+	if direction == LEFT {
+		p.Position.X = 0
+		return
+	}
+	p.Position.X = float64(SCREEN_WIDTH - p.Size.Width)
+
+}
+
+// Shoot handles the shooting mechanic
+func (p *Player) Shoot() {
+	p.ShootingCoolDown.Update()
+
+	if ebiten.IsKeyPressed(ebiten.KeySpace) && p.ShootingCoolDown.isReady() {
+		for i := range p.Game.Lasers {
+			if p.Game.Lasers[i] != nil {
+				continue
+			}
+			p.Game.Lasers[i] = NewLaser(p.Game)
+			break
+		}
+		p.ShootingCoolDown.resetTimer()
 	}
 }
 
 func (p *Player) Update() {
-	speed := 6.0
-
-	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
-		p.position.x -= speed
-	} else if ebiten.IsKeyPressed(ebiten.KeyRight) {
-		p.position.x += speed
-	}
-
-	if ebiten.IsKeyPressed(ebiten.KeySpace) && p.laserShootingTimer.isReady() {
-		bounds := p.image.Bounds()
-
-		halfX := float64(bounds.Dx()) / 2
-		halfY := float64(bounds.Dy()) / 2
-
-		laserPos := Vector{
-			p.position.x + halfX,
-			p.position.y - halfY,
-		}
-		laser := NewLaser(laserPos)
-		p.game.addLaser(laser)
-
-		p.laserShootingTimer.resetTimer()
-	}
-
-	p.laserShootingTimer.Update()
+	p.Move()
+	p.Shoot()
 }
 
 func (p *Player) Draw(screen *ebiten.Image) {
 	opt := &ebiten.DrawImageOptions{}
-
-	opt.GeoM.Translate(p.position.x, p.position.y)
-	screen.DrawImage(p.image, opt)
+	opt.GeoM.Translate(p.Position.X, p.Position.Y)
+	screen.DrawImage(p.Img, opt)
 }
 
-func (p *Player) Collider() Rect {
-	bounds := p.image.Bounds()
-	return NewRect(*p.position, bounds.Dx(), bounds.Dy())
+func (p *Player) GetRect() *Rect {
+	return NewRect(p.Sprite)
 }
